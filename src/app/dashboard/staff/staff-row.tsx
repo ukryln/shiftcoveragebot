@@ -12,13 +12,34 @@ type StaffMember = {
   telegram_id: number | null;
 };
 
-export function StaffRow({ staffMember }: { staffMember: StaffMember }) {
+export function StaffRow({
+  staffMember,
+  botUsername,
+}: {
+  staffMember: StaffMember;
+  botUsername: string;
+}) {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(staffMember.name);
   const [role, setRole] = useState(staffMember.role);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showInviteLink, setShowInviteLink] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
+
+  const inviteLink = `https://t.me/${botUsername}?start=${staffMember.id}`;
+
+  function handleShowInvite() {
+    setShowInviteLink(true);
+    // Best-effort auto-copy — nice when it works, but the visible, selectable
+    // text field below is the reliable fallback regardless of browser or
+    // permissions support for the Clipboard API.
+    navigator.clipboard.writeText(inviteLink).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }, () => {});
+  }
 
   function handleSave() {
     setError(null);
@@ -94,7 +115,23 @@ export function StaffRow({ staffMember }: { staffMember: StaffMember }) {
           <button onClick={handleArchiveToggle} disabled={isPending} className="text-sm text-red-600 underline disabled:opacity-50">
             {staffMember.status === "archived" ? "Reactivate" : "Archive"}
           </button>
+          {staffMember.status === "pending" && !showInviteLink && (
+            <button onClick={handleShowInvite} className="text-sm text-blue-600 underline">
+              Get invite link
+            </button>
+          )}
         </div>
+        {showInviteLink && (
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              readOnly
+              value={inviteLink}
+              onFocus={(e) => e.target.select()}
+              className="w-64 rounded border border-gray-300 px-1 py-0.5 text-xs text-gray-700"
+            />
+            {copied && <span className="text-xs text-green-700">Copied!</span>}
+          </div>
+        )}
       </td>
     </tr>
   );

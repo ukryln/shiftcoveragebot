@@ -11,7 +11,13 @@ type StaffMember = {
   telegram_id: number | null;
 };
 
-export function StaffTable({ staffList }: { staffList: StaffMember[] }) {
+export function StaffTable({
+  staffList,
+  botUsername,
+}: {
+  staffList: StaffMember[];
+  botUsername: string;
+}) {
   const [showArchived, setShowArchived] = useState(false);
 
   const visibleStaff = showArchived
@@ -43,7 +49,7 @@ export function StaffTable({ staffList }: { staffList: StaffMember[] }) {
           </thead>
           <tbody>
             {visibleStaff.map((staffMember) => (
-              <StaffRow key={staffMember.id} staffMember={staffMember} />
+              <StaffRow key={staffMember.id} staffMember={staffMember} botUsername={botUsername} />
             ))}
           </tbody>
         </table>

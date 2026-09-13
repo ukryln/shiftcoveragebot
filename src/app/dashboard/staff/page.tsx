@@ -46,7 +46,7 @@ export default async function StaffPage() {
       </Link>
       <h1 className="mt-2 text-2xl font-semibold text-gray-900">Staff — {shop.name}</h1>
 
-      <StaffTable staffList={staffList} />
+      <StaffTable staffList={staffList} botUsername={process.env.TELEGRAM_BOT_USERNAME!} />
 
       <div className="mt-8 flex flex-wrap gap-6">
         <AddStaffForm shopId={shop.id} />
