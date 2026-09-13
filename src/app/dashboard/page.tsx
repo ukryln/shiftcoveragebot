@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logout } from "@/app/actions/auth";
@@ -43,6 +44,9 @@ export default async function DashboardPage() {
               </li>
             ))}
           </ul>
+          <Link href="/dashboard/staff" className="mt-4 inline-block text-gray-900 underline">
+            Manage staff →
+          </Link>
         </div>
       )}
     </div>
