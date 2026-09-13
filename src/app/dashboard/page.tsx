@@ -44,9 +44,14 @@ export default async function DashboardPage() {
               </li>
             ))}
           </ul>
-          <Link href="/dashboard/staff" className="mt-4 inline-block text-gray-900 underline">
-            Manage staff →
-          </Link>
+          <div className="mt-4 flex gap-4">
+            <Link href="/dashboard/staff" className="text-gray-900 underline">
+              Manage staff →
+            </Link>
+            <Link href="/dashboard/shifts" className="text-gray-900 underline">
+              Manage shifts →
+            </Link>
+          </div>
         </div>
       )}
     </div>
