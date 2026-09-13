@@ -3,86 +3,65 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 
-export type ShiftFormState = { error?: string } | undefined;
+export type RosterCellResult = { id: string | null; error?: string };
 
-export async function createShift(
-  _prevState: ShiftFormState,
-  formData: FormData
-): Promise<ShiftFormState> {
-  const shopId = formData.get("shopId") as string;
-  const staffId = formData.get("staffId") as string;
-  const roleRequired = formData.get("roleRequired") as string;
-  const startTime = formData.get("startTime") as string;
-  const endTime = formData.get("endTime") as string;
+// Handles create/update/delete for one roster grid cell in a single call:
+// a null start/end means "OFF" or blank, i.e. delete the shift if one exists.
+export async function saveRosterCell(input: {
+  shiftId: string | null;
+  shopId: string;
+  staffId: string;
+  roleRequired: string;
+  startTimeIso: string | null;
+  endTimeIso: string | null;
+}): Promise<RosterCellResult> {
+  const { shiftId, shopId, staffId, roleRequired, startTimeIso, endTimeIso } = input;
 
-  if (!shopId) {
-    return { error: "Missing shop." };
-  }
-  if (!roleRequired || !roleRequired.trim()) {
-    return { error: "Role required is needed." };
-  }
-  if (!startTime || !endTime) {
-    return { error: "Start and end time are required." };
-  }
-  if (new Date(endTime) <= new Date(startTime)) {
-    return { error: "End time must be after start time." };
-  }
-
-  const { error } = await supabaseAdmin.from("shifts").insert({
-    shop_id: shopId,
-    staff_id: staffId || null,
-    role_required: roleRequired.trim(),
-    start_time: startTime,
-    end_time: endTime,
-  });
-
-  if (error) {
-    return { error: error.message };
+  if (!startTimeIso || !endTimeIso) {
+    if (shiftId) {
+      const { error } = await supabaseAdmin.from("shifts").delete().eq("id", shiftId);
+      if (error) {
+        return { id: shiftId, error: error.message };
+      }
+    }
+    revalidatePath("/dashboard/shifts");
+    return { id: null };
   }
 
-  revalidatePath("/dashboard/shifts");
-}
+  if (shiftId) {
+    const { error } = await supabaseAdmin
+      .from("shifts")
+      .update({
+        staff_id: staffId,
+        role_required: roleRequired,
+        start_time: startTimeIso,
+        end_time: endTimeIso,
+      })
+      .eq("id", shiftId);
 
-export async function updateShift(
-  shiftId: string,
-  staffId: string | null,
-  roleRequired: string,
-  startTime: string,
-  endTime: string
-): Promise<ShiftFormState> {
-  if (!roleRequired.trim()) {
-    return { error: "Role required is needed." };
-  }
-  if (!startTime || !endTime) {
-    return { error: "Start and end time are required." };
-  }
-  if (new Date(endTime) <= new Date(startTime)) {
-    return { error: "End time must be after start time." };
+    if (error) {
+      return { id: shiftId, error: error.message };
+    }
+    revalidatePath("/dashboard/shifts");
+    return { id: shiftId };
   }
 
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("shifts")
-    .update({
-      staff_id: staffId || null,
-      role_required: roleRequired.trim(),
-      start_time: startTime,
-      end_time: endTime,
+    .insert({
+      shop_id: shopId,
+      staff_id: staffId,
+      role_required: roleRequired,
+      start_time: startTimeIso,
+      end_time: endTimeIso,
     })
-    .eq("id", shiftId);
+    .select()
+    .single();
 
   if (error) {
-    return { error: error.message };
+    return { id: null, error: error.message };
   }
 
   revalidatePath("/dashboard/shifts");
-}
-
-export async function deleteShift(shiftId: string): Promise<ShiftFormState> {
-  const { error } = await supabaseAdmin.from("shifts").delete().eq("id", shiftId);
-
-  if (error) {
-    return { error: error.message };
-  }
-
-  revalidatePath("/dashboard/shifts");
+  return { id: data.id };
 }
