@@ -12,13 +12,32 @@ create table if not exists shops (
 );
 
 -- 2. users: people who log into the dashboard (managers + super-admin).
+-- id matches the corresponding row in Supabase's built-in auth.users table —
+-- login/password is handled by Supabase Auth, not stored here.
 create table if not exists users (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
-  password_hash text not null,
   is_super_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+-- Auto-create a `users` row whenever someone signs up via Supabase Auth.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.users (id, email)
+  values (new.id, new.email);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
 -- 3. shop_managers: link table, which users manage which shops (many-to-many).
 create table if not exists shop_managers (
