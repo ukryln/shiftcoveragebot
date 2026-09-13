@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateShift, deleteShift } from "@/app/actions/shifts";
 
@@ -24,6 +24,21 @@ function isoToLocalInputValue(iso: string) {
 
 function formatShiftTime(iso: string) {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+// The server and the browser can disagree on the default locale/timezone for
+// toLocaleString(), which causes a React "hydration mismatch" if rendered
+// directly. Formatting only after mount guarantees both the server-rendered
+// HTML and the first client render show the same (blank) thing, then the
+// real, correctly-localized time appears a moment later.
+function ShiftTime({ iso }: { iso: string }) {
+  const [formatted, setFormatted] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFormatted(formatShiftTime(iso));
+  }, [iso]);
+
+  return <>{formatted ?? " "}</>;
 }
 
 export function ShiftRow({ shift, staffOptions }: { shift: Shift; staffOptions: StaffOption[] }) {
@@ -133,8 +148,12 @@ export function ShiftRow({ shift, staffOptions }: { shift: Shift; staffOptions: 
         {shift.staffName ?? <span className="text-gray-400">Unassigned</span>}
       </td>
       <td className="py-2 pr-2 text-gray-700">{shift.role_required}</td>
-      <td className="py-2 pr-2 text-gray-700">{formatShiftTime(shift.start_time)}</td>
-      <td className="py-2 pr-2 text-gray-700">{formatShiftTime(shift.end_time)}</td>
+      <td className="py-2 pr-2 text-gray-700">
+        <ShiftTime iso={shift.start_time} />
+      </td>
+      <td className="py-2 pr-2 text-gray-700">
+        <ShiftTime iso={shift.end_time} />
+      </td>
       <td className="py-2">
         {confirmingDelete ? (
           <div className="flex items-center gap-3">
