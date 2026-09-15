@@ -320,7 +320,8 @@ async function notifyManagers(
   const { data: managerLinks } = await supabaseAdmin
     .from("shop_managers")
     .select("users(telegram_id)")
-    .eq("shop_id", shopId);
+    .eq("shop_id", shopId)
+    .returns<{ users: { telegram_id: number | null } }[]>();
 
   const managerTelegramIds = (managerLinks ?? [])
     .map((row) => row.users?.telegram_id)
@@ -354,7 +355,8 @@ async function notifyOtherManagers(
     .from("shop_managers")
     .select("user_id, users(telegram_id)")
     .eq("shop_id", shopId)
-    .neq("user_id", excludingManagerId);
+    .neq("user_id", excludingManagerId)
+    .returns<{ user_id: string; users: { telegram_id: number | null } }[]>();
 
   const managerTelegramIds = (managerLinks ?? [])
     .map((row) => row.users?.telegram_id)
@@ -400,7 +402,14 @@ bot.on("callback_query:data", async (ctx, next) => {
     .from("coverage_requests")
     .select("id, status, shift_id, requested_by, shifts(shop_id, start_time, end_time, role_required)")
     .eq("id", requestId)
-    .maybeSingle();
+    .maybeSingle()
+    .returns<{
+      id: string;
+      status: string;
+      shift_id: string;
+      requested_by: string;
+      shifts: { shop_id: string; start_time: string; end_time: string; role_required: string };
+    } | null>();
 
   if (!manager || !request) {
     await ctx.answerCallbackQuery({ text: "Couldn't find that request." });
@@ -468,7 +477,12 @@ async function broadcastRequest(requestId: string) {
     .from("coverage_requests")
     .select("id, requested_by, shifts(shop_id, start_time, end_time, role_required)")
     .eq("id", requestId)
-    .maybeSingle();
+    .maybeSingle()
+    .returns<{
+      id: string;
+      requested_by: string;
+      shifts: { shop_id: string; start_time: string; end_time: string; role_required: string };
+    } | null>();
 
   if (!request || !request.shifts) return;
   const shift = request.shifts;
@@ -476,7 +490,10 @@ async function broadcastRequest(requestId: string) {
   const { data: staffLinks } = await supabaseAdmin
     .from("staff_shops")
     .select("staff(id, role, status, telegram_id)")
-    .eq("shop_id", shift.shop_id);
+    .eq("shop_id", shift.shop_id)
+    .returns<
+      { staff: { id: string; role: string; status: string; telegram_id: number | null } }[]
+    >();
 
   const eligibleStaff = (staffLinks ?? [])
     .map((row) => row.staff)
@@ -560,7 +577,8 @@ bot.on("callback_query:data", async (ctx, next) => {
     .eq("id", requestId)
     .eq("status", "broadcasting")
     .select("id, requested_by, shifts(shop_id)")
-    .maybeSingle();
+    .maybeSingle()
+    .returns<{ id: string; requested_by: string; shifts: { shop_id: string } } | null>();
 
   if (!updated) {
     await safeUi(() => ctx.answerCallbackQuery({ text: "Sorry, this shift is already covered!" }));
@@ -581,7 +599,8 @@ bot.on("callback_query:data", async (ctx, next) => {
     .from("coverage_responses")
     .select("staff(telegram_id)")
     .eq("coverage_request_id", requestId)
-    .neq("staff_id", staffMember.id);
+    .neq("staff_id", staffMember.id)
+    .returns<{ staff: { telegram_id: number | null } }[]>();
 
   for (const row of otherResponses ?? []) {
     const otherTelegramId = row.staff?.telegram_id;
@@ -613,7 +632,8 @@ bot.on("callback_query:data", async (ctx, next) => {
   const { data: managerLinks } = await supabaseAdmin
     .from("shop_managers")
     .select("users(telegram_id)")
-    .eq("shop_id", updated.shifts!.shop_id);
+    .eq("shop_id", updated.shifts!.shop_id)
+    .returns<{ users: { telegram_id: number | null } }[]>();
 
   const managerTelegramIds = (managerLinks ?? [])
     .map((row) => row.users?.telegram_id)

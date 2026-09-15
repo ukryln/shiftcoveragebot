@@ -19,7 +19,8 @@ export default async function ShiftsPage({
   const { data: managedShops } = await supabaseAdmin
     .from("shop_managers")
     .select("shops(id, name)")
-    .eq("user_id", user!.id);
+    .eq("user_id", user!.id)
+    .returns<{ shops: { id: string; name: string } }[]>();
 
   const shop = managedShops?.[0]?.shops;
 
@@ -46,7 +47,8 @@ export default async function ShiftsPage({
   const { data: staffLinks } = await supabaseAdmin
     .from("staff_shops")
     .select("staff(id, name, role, status)")
-    .eq("shop_id", shop.id);
+    .eq("shop_id", shop.id)
+    .returns<{ staff: { id: string; name: string; role: string; status: string } }[]>();
 
   const staffList = (staffLinks ?? [])
     .map((row) => row.staff)

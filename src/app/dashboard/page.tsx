@@ -14,7 +14,8 @@ export default async function DashboardPage() {
   const { data: managedShops } = await supabaseAdmin
     .from("shop_managers")
     .select("shops(id, name)")
-    .eq("user_id", user!.id);
+    .eq("user_id", user!.id)
+    .returns<{ shops: { id: string; name: string } }[]>();
 
   const shops = (managedShops ?? []).map((row) => row.shops).filter(Boolean);
 
