@@ -28,7 +28,7 @@ export function StaffRow({
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  const inviteLink = `https://t.me/${botUsername}?start=${staffMember.id}`;
+  const inviteLink = `https://t.me/${botUsername}?start=staff_${staffMember.id}`;
 
   function handleShowInvite() {
     setShowInviteLink(true);

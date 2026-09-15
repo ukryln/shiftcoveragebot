@@ -1,4 +1,5 @@
 import { bot } from "./bot";
+import "./handlers";
 
 // Local development runner — uses long polling (the bot repeatedly asks
 // Telegram "any new messages?") so it works without needing a public URL.

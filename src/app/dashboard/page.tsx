@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logout } from "@/app/actions/auth";
 import { CreateShopForm } from "@/app/dashboard/create-shop-form";
+import { ConnectTelegram } from "@/app/dashboard/connect-telegram";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -16,6 +17,12 @@ export default async function DashboardPage() {
     .eq("user_id", user!.id);
 
   const shops = (managedShops ?? []).map((row) => row.shops).filter(Boolean);
+
+  const { data: managerRow } = await supabaseAdmin
+    .from("users")
+    .select("telegram_id")
+    .eq("id", user!.id)
+    .maybeSingle();
 
   return (
     <div className="p-8">
@@ -52,6 +59,11 @@ export default async function DashboardPage() {
               Manage shifts →
             </Link>
           </div>
+          <ConnectTelegram
+            userId={user!.id}
+            botUsername={process.env.TELEGRAM_BOT_USERNAME!}
+            isConnected={Boolean(managerRow?.telegram_id)}
+          />
         </div>
       )}
     </div>
