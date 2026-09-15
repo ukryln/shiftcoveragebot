@@ -13,7 +13,17 @@ import "@/bot/handlers";
 // aborting critical logic further down the same handler.
 export async function POST(request: NextRequest) {
   const secretHeader = request.headers.get("x-telegram-bot-api-secret-token");
-  if (secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (secretHeader !== expected) {
+    // Temporary diagnostic logging (no secret values, just presence/length)
+    // while tracking down a mismatch on the live deployment.
+    console.error("Webhook secret mismatch", {
+      headerPresent: secretHeader !== null,
+      headerLength: secretHeader?.length ?? 0,
+      envVarPresent: expected !== undefined,
+      envVarLength: expected?.length ?? 0,
+      allHeaderKeys: [...request.headers.keys()],
+    });
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
