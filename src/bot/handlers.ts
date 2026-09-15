@@ -242,13 +242,35 @@ bot.on("message:text", async (ctx, next) => {
     return;
   }
 
+  // If the person requesting is also a manager for this shop, there's no one
+  // else who needs to approve it - skip straight to broadcasting.
+  const { data: managerSelf } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("telegram_id", telegramId)
+    .maybeSingle();
+
+  let selfApprovingManagerId: string | null = null;
+  if (managerSelf) {
+    const { data: managesThisShop } = await supabaseAdmin
+      .from("shop_managers")
+      .select("user_id")
+      .eq("user_id", managerSelf.id)
+      .eq("shop_id", shift.shop_id)
+      .maybeSingle();
+    if (managesThisShop) {
+      selfApprovingManagerId = managerSelf.id;
+    }
+  }
+
   const { data: request, error } = await supabaseAdmin
     .from("coverage_requests")
     .insert({
       shift_id: shift.id,
       requested_by: staffMember.id,
       reason,
-      status: "pending_approval",
+      status: selfApprovingManagerId ? "broadcasting" : "pending_approval",
+      approved_by: selfApprovingManagerId,
     })
     .select()
     .single();
@@ -258,11 +280,19 @@ bot.on("message:text", async (ctx, next) => {
     return;
   }
 
-  await ctx.reply("Request sent to your manager — I'll let you know what happens!", {
-    reply_markup: staffMenu,
-  });
-
-  await notifyManagers(shift.shop_id, request.id, staffMember.name, shift, reason);
+  if (selfApprovingManagerId) {
+    await ctx.reply("Request created — since you're a manager, I'm broadcasting it to the team now!", {
+      reply_markup: staffMenu,
+    });
+    await notifyOtherManagers(shift.shop_id, selfApprovingManagerId, staffMember.name, shift, reason);
+    // Broadcasting to matching staff isn't built yet - see notifyManagers'
+    // approve handler for the same TODO.
+  } else {
+    await ctx.reply("Request sent to your manager — I'll let you know what happens!", {
+      reply_markup: staffMenu,
+    });
+    await notifyManagers(shift.shop_id, request.id, staffMember.name, shift, reason);
+  }
 });
 
 async function notifyManagers(
@@ -292,6 +322,38 @@ async function notifyManagers(
   for (const telegramId of managerTelegramIds) {
     try {
       await bot.api.sendMessage(telegramId, messageText, { reply_markup: keyboard });
+    } catch (err) {
+      console.error("Failed to notify manager", telegramId, err);
+    }
+  }
+}
+
+async function notifyOtherManagers(
+  shopId: string,
+  excludingManagerId: string,
+  staffName: string,
+  shift: { start_time: string; end_time: string; role_required: string },
+  reason: string | null
+) {
+  const { data: managerLinks } = await supabaseAdmin
+    .from("shop_managers")
+    .select("user_id, users(telegram_id)")
+    .eq("shop_id", shopId)
+    .neq("user_id", excludingManagerId);
+
+  const managerTelegramIds = (managerLinks ?? [])
+    .map((row) => row.users?.telegram_id)
+    .filter((id): id is number => Boolean(id));
+
+  if (managerTelegramIds.length === 0) return;
+
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const reasonLine = reason ? `\nReason: ${reason}` : "";
+  const messageText = `FYI: ${staffName} requested and auto-approved coverage for their own shift:\n${shiftLine} (${shift.role_required})${reasonLine}`;
+
+  for (const telegramId of managerTelegramIds) {
+    try {
+      await bot.api.sendMessage(telegramId, messageText);
     } catch (err) {
       console.error("Failed to notify manager", telegramId, err);
     }
