@@ -17,6 +17,7 @@ create table if not exists shops (
 create table if not exists users (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
+  telegram_id bigint unique,
   is_super_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
