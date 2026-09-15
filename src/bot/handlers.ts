@@ -4,6 +4,22 @@ import { supabaseAdmin } from "../lib/supabase/admin";
 import { formatShiftLine, staffMenu } from "./format";
 import { awaitingReasonFor } from "./state";
 
+// Best-effort UI feedback (acknowledging a button tap, editing a message) can
+// fail for reasons that have nothing to do with our own logic — a stale
+// callback query, a message that's too old to edit, etc. Since nothing here
+// catches errors automatically for direct handleUpdate() calls (grammY's
+// bot.catch() only covers the polling loop), an unguarded failure here would
+// silently abort everything after it in the same handler — including
+// database writes and notifications still to come. Wrap these calls so a UI
+// hiccup never blocks the actual business logic.
+async function safeUi(action: () => Promise<unknown>) {
+  try {
+    await action();
+  } catch (err) {
+    console.error("Non-critical UI call failed:", err);
+  }
+}
+
 // ---- Onboarding: /start staff_<id> or /start manager_<id> ----
 
 bot.command("start", async (ctx) => {
@@ -199,7 +215,7 @@ bot.on("callback_query:data", async (ctx, next) => {
     }
 
     awaitingReasonFor.set(telegramId, shiftId);
-    await ctx.answerCallbackQuery();
+    await safeUi(() => ctx.answerCallbackQuery());
     await ctx.reply(
       "Want to add a reason (e.g. \"sick\")? Reply with it now, or send \"skip\" to leave it blank."
     );
@@ -285,8 +301,7 @@ bot.on("message:text", async (ctx, next) => {
       reply_markup: staffMenu,
     });
     await notifyOtherManagers(shift.shop_id, selfApprovingManagerId, staffMember.name, shift, reason);
-    // Broadcasting to matching staff isn't built yet - see notifyManagers'
-    // approve handler for the same TODO.
+    await broadcastRequest(request.id);
   } else {
     await ctx.reply("Request sent to your manager — I'll let you know what happens!", {
       reply_markup: staffMenu,
@@ -419,9 +434,9 @@ bot.on("callback_query:data", async (ctx, next) => {
     })
     .eq("id", requestId);
 
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    `${ctx.callbackQuery.message?.text}\n\n${isApprove ? "✅ Approved" : "❌ Rejected"}`
+  await safeUi(() => ctx.answerCallbackQuery());
+  await safeUi(() =>
+    ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n${isApprove ? "✅ Approved" : "❌ Rejected"}`)
   );
 
   const { data: requester } = await supabaseAdmin
@@ -441,6 +456,177 @@ bot.on("callback_query:data", async (ctx, next) => {
     }
   }
 
-  // Broadcasting to matching staff and first-to-accept comes next — for now,
-  // an approved request just sits at "broadcasting" with nothing sent out yet.
+  if (isApprove) {
+    await broadcastRequest(requestId);
+  }
+});
+
+// ---- Broadcast an approved request to matching, available staff ----
+
+async function broadcastRequest(requestId: string) {
+  const { data: request } = await supabaseAdmin
+    .from("coverage_requests")
+    .select("id, requested_by, shifts(shop_id, start_time, end_time, role_required)")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (!request || !request.shifts) return;
+  const shift = request.shifts;
+
+  const { data: staffLinks } = await supabaseAdmin
+    .from("staff_shops")
+    .select("staff(id, role, status, telegram_id)")
+    .eq("shop_id", shift.shop_id);
+
+  const eligibleStaff = (staffLinks ?? [])
+    .map((row) => row.staff)
+    .filter((staffMember): staffMember is NonNullable<typeof staffMember> => Boolean(staffMember))
+    .filter((staffMember) => staffMember.status === "active")
+    .filter((staffMember) => staffMember.role === shift.role_required)
+    .filter((staffMember) => staffMember.id !== request.requested_by)
+    .filter((staffMember) => Boolean(staffMember.telegram_id));
+
+  if (eligibleStaff.length === 0) {
+    const { data: requesterStaff } = await supabaseAdmin
+      .from("staff")
+      .select("telegram_id")
+      .eq("id", request.requested_by)
+      .maybeSingle();
+    if (requesterStaff?.telegram_id) {
+      try {
+        await bot.api.sendMessage(
+          requesterStaff.telegram_id,
+          "I couldn't find anyone else with a matching role to offer this shift to — your manager may need to sort this out directly."
+        );
+      } catch (err) {
+        console.error("Failed to notify requester of empty broadcast", err);
+      }
+    }
+    return;
+  }
+
+  await supabaseAdmin.from("coverage_responses").insert(
+    eligibleStaff.map((staffMember) => ({
+      coverage_request_id: requestId,
+      staff_id: staffMember.id,
+      response: "no_response",
+    }))
+  );
+
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const keyboard = new InlineKeyboard().text("✅ I'll cover it", `cover:${requestId}`);
+
+  for (const staffMember of eligibleStaff) {
+    try {
+      await bot.api.sendMessage(
+        staffMember.telegram_id!,
+        `Coverage needed:\n${shiftLine} (${shift.role_required})`,
+        { reply_markup: keyboard }
+      );
+    } catch (err) {
+      console.error("Failed to notify staff for broadcast", staffMember.telegram_id, err);
+    }
+  }
+}
+
+// ---- Staff: tapped "I'll cover it" — first response wins, strictly ----
+
+bot.on("callback_query:data", async (ctx, next) => {
+  const data = ctx.callbackQuery.data;
+  if (!data.startsWith("cover:")) {
+    await next();
+    return;
+  }
+
+  const requestId = data.slice("cover:".length);
+  const telegramId = ctx.from.id;
+
+  const { data: staffMember } = await supabaseAdmin
+    .from("staff")
+    .select("id, name")
+    .eq("telegram_id", telegramId)
+    .maybeSingle();
+
+  if (!staffMember) {
+    await ctx.answerCallbackQuery({ text: "I don't recognize you." });
+    return;
+  }
+
+  // Atomic compare-and-swap: only succeeds for whichever tap Postgres
+  // processes first, so simultaneous taps can never both "win".
+  const { data: updated } = await supabaseAdmin
+    .from("coverage_requests")
+    .update({ status: "filled", covered_by: staffMember.id, resolved_at: new Date().toISOString() })
+    .eq("id", requestId)
+    .eq("status", "broadcasting")
+    .select("id, requested_by, shifts(shop_id)")
+    .maybeSingle();
+
+  if (!updated) {
+    await safeUi(() => ctx.answerCallbackQuery({ text: "Sorry, this shift is already covered!" }));
+    await safeUi(() => ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n(Already covered by someone else)`));
+    return;
+  }
+
+  await safeUi(() => ctx.answerCallbackQuery({ text: "You're covering this shift!" }));
+  await safeUi(() => ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n✅ You're covering this shift!`));
+
+  await supabaseAdmin
+    .from("coverage_responses")
+    .update({ response: "yes", responded_at: new Date().toISOString() })
+    .eq("coverage_request_id", requestId)
+    .eq("staff_id", staffMember.id);
+
+  const { data: otherResponses } = await supabaseAdmin
+    .from("coverage_responses")
+    .select("staff(telegram_id)")
+    .eq("coverage_request_id", requestId)
+    .neq("staff_id", staffMember.id);
+
+  for (const row of otherResponses ?? []) {
+    const otherTelegramId = row.staff?.telegram_id;
+    if (!otherTelegramId) continue;
+    try {
+      await bot.api.sendMessage(otherTelegramId, "This shift has already been covered — thanks anyway!");
+    } catch (err) {
+      console.error("Failed to notify other pinged staff", otherTelegramId, err);
+    }
+  }
+
+  const { data: requesterStaff } = await supabaseAdmin
+    .from("staff")
+    .select("telegram_id")
+    .eq("id", updated.requested_by)
+    .maybeSingle();
+
+  if (requesterStaff?.telegram_id) {
+    try {
+      await bot.api.sendMessage(
+        requesterStaff.telegram_id,
+        `Good news — ${staffMember.name} is covering your shift!`
+      );
+    } catch (err) {
+      console.error("Failed to notify requester", err);
+    }
+  }
+
+  const { data: managerLinks } = await supabaseAdmin
+    .from("shop_managers")
+    .select("users(telegram_id)")
+    .eq("shop_id", updated.shifts!.shop_id);
+
+  const managerTelegramIds = (managerLinks ?? [])
+    .map((row) => row.users?.telegram_id)
+    .filter((id): id is number => Boolean(id));
+
+  for (const managerTelegramId of managerTelegramIds) {
+    try {
+      await bot.api.sendMessage(
+        managerTelegramId,
+        `${staffMember.name} is now covering the shift that needed coverage.`
+      );
+    } catch (err) {
+      console.error("Failed to notify manager of coverage", managerTelegramId, err);
+    }
+  }
 });
