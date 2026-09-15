@@ -115,9 +115,9 @@ export function StaffRow({
           <button onClick={handleArchiveToggle} disabled={isPending} className="text-sm text-red-600 underline disabled:opacity-50">
             {staffMember.status === "archived" ? "Reactivate" : "Archive"}
           </button>
-          {staffMember.status === "pending" && !showInviteLink && (
+          {staffMember.status !== "archived" && !showInviteLink && (
             <button onClick={handleShowInvite} className="text-sm text-blue-600 underline">
-              Get invite link
+              {staffMember.status === "pending" ? "Get invite link" : "Get link again"}
             </button>
           )}
         </div>
