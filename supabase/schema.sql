@@ -74,7 +74,14 @@ create table if not exists shifts (
   role_required text not null,
   start_time timestamptz not null,
   end_time timestamptz not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Set when this shift row exists because someone covered a swap (rather
+  -- than being an originally-scheduled shift) — points back at the
+  -- coverage_requests row that created it (FK added below, once that table
+  -- exists — coverage_requests references shifts too, so there's a circular
+  -- dependency between the two tables). The original shift row is left
+  -- untouched so the schedule stays a true historical record.
+  covering_request_id uuid
 );
 
 -- 7. staff_availability: opt-outs — times a staff member is never available.
@@ -99,8 +106,32 @@ create table if not exists coverage_requests (
   approved_by uuid references users(id),
   covered_by uuid references staff(id),
   created_at timestamptz not null default now(),
-  resolved_at timestamptz
+  resolved_at timestamptz,
+  -- Sick pay claim: filed by the original staff member (only possible after
+  -- the shift is already covered), approved/rejected by a manager. An
+  -- approved claim doesn't change the shift's given-away status — it just
+  -- means those (still red) hours count back into their weekly total.
+  sick_leave_status text
+    check (sick_leave_status is null or sick_leave_status in ('pending', 'approved', 'rejected')),
+  sick_leave_requested_at timestamptz,
+  sick_leave_resolved_at timestamptz,
+  sick_leave_resolved_by uuid references users(id)
 );
+
+-- Deferred FK: shifts.covering_request_id -> coverage_requests.id. Added
+-- here because coverage_requests didn't exist yet when `shifts` was created.
+-- Postgres has no "ADD CONSTRAINT IF NOT EXISTS", so check manually to keep
+-- this file safely re-runnable.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'shifts_covering_request_id_fkey'
+  ) then
+    alter table shifts
+      add constraint shifts_covering_request_id_fkey
+      foreign key (covering_request_id) references coverage_requests(id);
+  end if;
+end $$;
 
 -- 9. coverage_responses: who was pinged for a request and what they said.
 create table if not exists coverage_responses (

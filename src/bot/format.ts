@@ -5,7 +5,7 @@ import { Keyboard } from "grammy";
 // bot reply to infer a timezone from.
 export const SHOP_TIMEZONE = "Pacific/Auckland";
 
-export const staffMenu = new Keyboard().text("📅 My Shifts").resized();
+export const staffMenu = new Keyboard().text("📅 My Shifts").text("💰 Sick Pay Claims").resized();
 
 export function formatShiftLine(startIso: string, endIso: string, role: string): string {
   const start = new Date(startIso);

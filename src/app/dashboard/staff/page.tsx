@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getCurrentShop } from "@/lib/current-shop";
 import { AddStaffForm } from "@/app/dashboard/staff/add-staff-form";
 import { BulkAddForm } from "@/app/dashboard/staff/bulk-add-form";
 import { StaffTable } from "@/app/dashboard/staff/staff-table";
@@ -11,25 +12,17 @@ export default async function StaffPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: managedShops } = await supabaseAdmin
-    .from("shop_managers")
-    .select("shops(id, name)")
-    .eq("user_id", user!.id)
-    .returns<{ shops: { id: string; name: string } }[]>();
-
-  const shop = managedShops?.[0]?.shops;
+  const { shop } = await getCurrentShop(user!.id);
 
   if (!shop) {
     return (
-      <div className="p-8">
-        <p className="text-gray-700">
-          You need to{" "}
-          <Link href="/dashboard" className="underline">
-            create a shop
-          </Link>{" "}
-          before adding staff.
-        </p>
-      </div>
+      <p className="text-slate-600">
+        You need to{" "}
+        <Link href="/dashboard" className="text-indigo-600 underline">
+          create a shop
+        </Link>{" "}
+        before adding staff.
+      </p>
     );
   }
 
@@ -44,17 +37,20 @@ export default async function StaffPage() {
   const staffList = (staffLinks ?? []).map((row) => row.staff).filter(Boolean);
 
   return (
-    <div className="p-8">
-      <Link href="/dashboard" className="text-sm text-gray-500 underline">
-        ← Back to dashboard
-      </Link>
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Staff — {shop.name}</h1>
+    <div>
+      <h1 className="text-2xl font-bold text-slate-900">Staff — {shop.name}</h1>
 
-      <StaffTable staffList={staffList} botUsername={process.env.TELEGRAM_BOT_USERNAME!} />
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <StaffTable staffList={staffList} botUsername={process.env.TELEGRAM_BOT_USERNAME!} />
+      </div>
 
-      <div className="mt-8 flex flex-wrap gap-6">
-        <AddStaffForm shopId={shop.id} />
-        <BulkAddForm shopId={shop.id} />
+      <div className="mt-6 flex flex-wrap gap-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <AddStaffForm shopId={shop.id} />
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <BulkAddForm shopId={shop.id} />
+        </div>
       </div>
     </div>
   );

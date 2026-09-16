@@ -7,9 +7,9 @@ export function CreateShopForm() {
   const [state, action, pending] = useActionState(createShop, undefined);
 
   return (
-    <form action={action} className="mt-4 max-w-sm space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <form action={action} className="space-y-4">
       <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="name" className="block text-sm font-medium text-slate-700">
           Shop name
         </label>
         <input
@@ -17,7 +17,7 @@ export function CreateShopForm() {
           name="name"
           type="text"
           required
-          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
       </div>
 
@@ -26,7 +26,7 @@ export function CreateShopForm() {
       <button
         disabled={pending}
         type="submit"
-        className="w-full rounded bg-gray-900 py-2 text-white disabled:opacity-50"
+        className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
         {pending ? "Creating..." : "Create shop"}
       </button>

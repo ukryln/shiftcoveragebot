@@ -188,6 +188,205 @@ bot.hears("📅 My Shifts", async (ctx) => {
   });
 });
 
+// ---- Staff: browse past covered shifts to claim sick pay for ----
+
+bot.hears("💰 Sick Pay Claims", async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+
+  const { data: staffMember } = await supabaseAdmin
+    .from("staff")
+    .select("id, name")
+    .eq("telegram_id", telegramId)
+    .maybeSingle();
+
+  if (!staffMember) {
+    await ctx.reply("I don't recognize you yet — please use the invite link your manager sent you.");
+    return;
+  }
+
+  const { data: requests } = await supabaseAdmin
+    .from("coverage_requests")
+    .select("id, shifts!coverage_requests_shift_id_fkey(start_time, end_time, role_required)")
+    .eq("requested_by", staffMember.id)
+    .eq("status", "filled")
+    .is("sick_leave_status", null)
+    .order("resolved_at", { ascending: false })
+    .limit(10)
+    .returns<{ id: string; shifts: { start_time: string; end_time: string; role_required: string } }[]>();
+
+  if (!requests || requests.length === 0) {
+    await ctx.reply("You have no covered shifts available to claim sick pay for.", { reply_markup: staffMenu });
+    return;
+  }
+
+  const keyboard = new InlineKeyboard();
+  for (const request of requests) {
+    keyboard
+      .text(
+        `Claim: ${formatShiftLine(request.shifts.start_time, request.shifts.end_time, request.shifts.role_required)}`,
+        `claimsick:${request.id}`
+      )
+      .row();
+  }
+
+  await ctx.reply("Shifts you've given away — tap one to claim sick pay for it:", {
+    reply_markup: keyboard,
+  });
+});
+
+// ---- Staff: tapped "Claim" for a covered shift ----
+
+bot.on("callback_query:data", async (ctx, next) => {
+  const data = ctx.callbackQuery.data;
+  if (!data.startsWith("claimsick:")) {
+    await next();
+    return;
+  }
+
+  const requestId = data.slice("claimsick:".length);
+  const telegramId = ctx.from.id;
+
+  const { data: staffMember } = await supabaseAdmin
+    .from("staff")
+    .select("id, name")
+    .eq("telegram_id", telegramId)
+    .maybeSingle();
+
+  const { data: updated } = await supabaseAdmin
+    .from("coverage_requests")
+    .update({ sick_leave_status: "pending", sick_leave_requested_at: new Date().toISOString() })
+    .eq("id", requestId)
+    .eq("requested_by", staffMember?.id ?? "")
+    .eq("status", "filled")
+    .is("sick_leave_status", null)
+    .select("id, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required)")
+    .maybeSingle()
+    .returns<{
+      id: string;
+      shifts: { shop_id: string; start_time: string; end_time: string; role_required: string };
+    } | null>();
+
+  if (!staffMember || !updated) {
+    await safeUi(() => ctx.answerCallbackQuery({ text: "That claim can't be made right now." }));
+    return;
+  }
+
+  await safeUi(() => ctx.answerCallbackQuery({ text: "Claim sent to your manager!" }));
+  await safeUi(() => ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n(Sick pay claim sent)`));
+
+  const shift = updated.shifts;
+  const { data: managerLinks } = await supabaseAdmin
+    .from("shop_managers")
+    .select("users(telegram_id)")
+    .eq("shop_id", shift.shop_id)
+    .returns<{ users: { telegram_id: number | null } }[]>();
+
+  const managerTelegramIds = (managerLinks ?? [])
+    .map((row) => row.users?.telegram_id)
+    .filter((id): id is number => Boolean(id));
+
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const keyboard = new InlineKeyboard()
+    .text("✅ Approve", `sickapprove:${requestId}`)
+    .text("❌ Reject", `sickreject:${requestId}`);
+
+  for (const managerTelegramId of managerTelegramIds) {
+    try {
+      await bot.api.sendMessage(
+        managerTelegramId,
+        `${staffMember.name} is requesting sick pay for a shift they already gave away:\n${shiftLine} (${shift.role_required})`,
+        { reply_markup: keyboard }
+      );
+    } catch (err) {
+      console.error("Failed to notify manager of sick pay claim", managerTelegramId, err);
+    }
+  }
+});
+
+// ---- Manager: tapped Approve or Reject on a sick pay claim ----
+
+bot.on("callback_query:data", async (ctx, next) => {
+  const data = ctx.callbackQuery.data;
+  const isApprove = data.startsWith("sickapprove:");
+  const isReject = data.startsWith("sickreject:");
+
+  if (!isApprove && !isReject) {
+    await next();
+    return;
+  }
+
+  const requestId = data.slice(data.indexOf(":") + 1);
+  const telegramId = ctx.from.id;
+
+  const { data: manager } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("telegram_id", telegramId)
+    .maybeSingle();
+
+  const { data: request } = await supabaseAdmin
+    .from("coverage_requests")
+    .select("id, sick_leave_status, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id)")
+    .eq("id", requestId)
+    .maybeSingle()
+    .returns<{ id: string; sick_leave_status: string | null; requested_by: string; shifts: { shop_id: string } } | null>();
+
+  if (!manager || !request) {
+    await ctx.answerCallbackQuery({ text: "Couldn't find that claim." });
+    return;
+  }
+
+  const { data: managesShop } = await supabaseAdmin
+    .from("shop_managers")
+    .select("user_id")
+    .eq("user_id", manager.id)
+    .eq("shop_id", request.shifts!.shop_id)
+    .maybeSingle();
+
+  if (!managesShop) {
+    await ctx.answerCallbackQuery({ text: "You don't manage this shop." });
+    return;
+  }
+
+  if (request.sick_leave_status !== "pending") {
+    await ctx.answerCallbackQuery({ text: "This claim was already handled." });
+    return;
+  }
+
+  const newStatus = isApprove ? "approved" : "rejected";
+  await supabaseAdmin
+    .from("coverage_requests")
+    .update({
+      sick_leave_status: newStatus,
+      sick_leave_resolved_at: new Date().toISOString(),
+      sick_leave_resolved_by: manager.id,
+    })
+    .eq("id", requestId);
+
+  await safeUi(() => ctx.answerCallbackQuery());
+  await safeUi(() =>
+    ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n${isApprove ? "✅ Approved" : "❌ Rejected"}`)
+  );
+
+  const { data: requesterStaff } = await supabaseAdmin
+    .from("staff")
+    .select("telegram_id")
+    .eq("id", request.requested_by)
+    .maybeSingle();
+
+  if (requesterStaff?.telegram_id) {
+    const outcome = isApprove
+      ? "Your sick pay claim was approved — those hours are back in your weekly total."
+      : "Your sick pay claim was rejected.";
+    try {
+      await bot.api.sendMessage(requesterStaff.telegram_id, outcome);
+    } catch (err) {
+      console.error("Failed to notify requester of sick pay claim outcome", err);
+    }
+  }
+});
+
 // ---- Staff: tapped "Request coverage" for a specific shift ----
 
 bot.on("callback_query:data", async (ctx, next) => {
@@ -400,7 +599,7 @@ bot.on("callback_query:data", async (ctx, next) => {
 
   const { data: request } = await supabaseAdmin
     .from("coverage_requests")
-    .select("id, status, shift_id, requested_by, shifts(shop_id, start_time, end_time, role_required)")
+    .select("id, status, shift_id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required)")
     .eq("id", requestId)
     .maybeSingle()
     .returns<{
@@ -475,7 +674,7 @@ bot.on("callback_query:data", async (ctx, next) => {
 async function broadcastRequest(requestId: string) {
   const { data: request } = await supabaseAdmin
     .from("coverage_requests")
-    .select("id, requested_by, shifts(shop_id, start_time, end_time, role_required)")
+    .select("id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required)")
     .eq("id", requestId)
     .maybeSingle()
     .returns<{
@@ -576,9 +775,13 @@ bot.on("callback_query:data", async (ctx, next) => {
     .update({ status: "filled", covered_by: staffMember.id, resolved_at: new Date().toISOString() })
     .eq("id", requestId)
     .eq("status", "broadcasting")
-    .select("id, requested_by, shifts(shop_id)")
+    .select("id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, role_required, start_time, end_time)")
     .maybeSingle()
-    .returns<{ id: string; requested_by: string; shifts: { shop_id: string } } | null>();
+    .returns<{
+      id: string;
+      requested_by: string;
+      shifts: { shop_id: string; role_required: string; start_time: string; end_time: string };
+    } | null>();
 
   if (!updated) {
     await safeUi(() => ctx.answerCallbackQuery({ text: "Sorry, this shift is already covered!" }));
@@ -594,6 +797,25 @@ bot.on("callback_query:data", async (ctx, next) => {
     .update({ response: "yes", responded_at: new Date().toISOString() })
     .eq("coverage_request_id", requestId)
     .eq("staff_id", staffMember.id);
+
+  // Record the swap on the roster: insert a NEW shift row for the covering
+  // staff member rather than reassigning the original one, so the original
+  // schedule stays a true historical record (see roster-grid's red/blue
+  // cell coloring, which relies on this new row existing).
+  const coveredShift = updated.shifts;
+  if (coveredShift) {
+    const { error: insertShiftError } = await supabaseAdmin.from("shifts").insert({
+      shop_id: coveredShift.shop_id,
+      staff_id: staffMember.id,
+      role_required: coveredShift.role_required,
+      start_time: coveredShift.start_time,
+      end_time: coveredShift.end_time,
+      covering_request_id: updated.id,
+    });
+    if (insertShiftError) {
+      console.error("Failed to insert covering shift row", insertShiftError);
+    }
+  }
 
   const { data: otherResponses } = await supabaseAdmin
     .from("coverage_responses")
