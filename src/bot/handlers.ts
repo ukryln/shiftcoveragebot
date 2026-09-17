@@ -1,6 +1,7 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { bot } from "./bot";
 import { supabaseAdmin } from "../lib/supabase/admin";
+import { findCrossShopConflict } from "../lib/shift-conflicts";
 import { formatShiftLine, staffMenu } from "./format";
 import { awaitingReasonFor } from "./state";
 
@@ -162,11 +163,14 @@ bot.hears("📅 My Shifts", async (ctx) => {
 
   const { data: shifts } = await supabaseAdmin
     .from("shifts")
-    .select("id, start_time, end_time, role_required")
+    .select("id, start_time, end_time, role_required, shops(name)")
     .eq("staff_id", staffMember.id)
     .gte("start_time", new Date().toISOString())
     .order("start_time")
-    .limit(10);
+    .limit(10)
+    .returns<
+      { id: string; start_time: string; end_time: string; role_required: string; shops: { name: string } | null }[]
+    >();
 
   if (!shifts || shifts.length === 0) {
     await ctx.reply("You have no upcoming shifts scheduled.", { reply_markup: staffMenu });
@@ -177,7 +181,7 @@ bot.hears("📅 My Shifts", async (ctx) => {
   for (const shift of shifts) {
     keyboard
       .text(
-        `Request coverage: ${formatShiftLine(shift.start_time, shift.end_time, shift.role_required)}`,
+        `Request coverage: ${formatShiftLine(shift.start_time, shift.end_time, shift.role_required, shift.shops?.name)}`,
         `reqcov:${shift.id}`
       )
       .row();
@@ -207,13 +211,20 @@ bot.hears("💰 Sick Pay Claims", async (ctx) => {
 
   const { data: requests } = await supabaseAdmin
     .from("coverage_requests")
-    .select("id, shifts!coverage_requests_shift_id_fkey(start_time, end_time, role_required)")
+    .select(
+      "id, shifts!coverage_requests_shift_id_fkey(start_time, end_time, role_required, shops(name))"
+    )
     .eq("requested_by", staffMember.id)
     .eq("status", "filled")
     .is("sick_leave_status", null)
     .order("resolved_at", { ascending: false })
     .limit(10)
-    .returns<{ id: string; shifts: { start_time: string; end_time: string; role_required: string } }[]>();
+    .returns<
+      {
+        id: string;
+        shifts: { start_time: string; end_time: string; role_required: string; shops: { name: string } | null };
+      }[]
+    >();
 
   if (!requests || requests.length === 0) {
     await ctx.reply("You have no covered shifts available to claim sick pay for.", { reply_markup: staffMenu });
@@ -224,7 +235,7 @@ bot.hears("💰 Sick Pay Claims", async (ctx) => {
   for (const request of requests) {
     keyboard
       .text(
-        `Claim: ${formatShiftLine(request.shifts.start_time, request.shifts.end_time, request.shifts.role_required)}`,
+        `Claim: ${formatShiftLine(request.shifts.start_time, request.shifts.end_time, request.shifts.role_required, request.shifts.shops?.name)}`,
         `claimsick:${request.id}`
       )
       .row();
@@ -260,11 +271,19 @@ bot.on("callback_query:data", async (ctx, next) => {
     .eq("requested_by", staffMember?.id ?? "")
     .eq("status", "filled")
     .is("sick_leave_status", null)
-    .select("id, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required)")
+    .select(
+      "id, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required, shops(name))"
+    )
     .maybeSingle()
     .returns<{
       id: string;
-      shifts: { shop_id: string; start_time: string; end_time: string; role_required: string };
+      shifts: {
+        shop_id: string;
+        start_time: string;
+        end_time: string;
+        role_required: string;
+        shops: { name: string } | null;
+      };
     } | null>();
 
   if (!staffMember || !updated) {
@@ -286,7 +305,7 @@ bot.on("callback_query:data", async (ctx, next) => {
     .map((row) => row.users?.telegram_id)
     .filter((id): id is number => Boolean(id));
 
-  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required, shift.shops?.name);
   const keyboard = new InlineKeyboard()
     .text("✅ Approve", `sickapprove:${requestId}`)
     .text("❌ Reject", `sickreject:${requestId}`);
@@ -448,9 +467,17 @@ bot.on("message:text", async (ctx, next) => {
 
   const { data: shift } = await supabaseAdmin
     .from("shifts")
-    .select("id, shop_id, start_time, end_time, role_required")
+    .select("id, shop_id, start_time, end_time, role_required, shops(name)")
     .eq("id", shiftId)
-    .maybeSingle();
+    .maybeSingle()
+    .returns<{
+      id: string;
+      shop_id: string;
+      start_time: string;
+      end_time: string;
+      role_required: string;
+      shops: { name: string } | null;
+    } | null>();
 
   if (!staffMember || !shift) {
     await ctx.reply("Something went wrong finding that shift — please try again from My Shifts.");
@@ -513,7 +540,7 @@ async function notifyManagers(
   shopId: string,
   requestId: string,
   staffName: string,
-  shift: { start_time: string; end_time: string; role_required: string },
+  shift: { start_time: string; end_time: string; role_required: string; shops?: { name: string } | null },
   reason: string | null
 ) {
   const { data: managerLinks } = await supabaseAdmin
@@ -526,7 +553,7 @@ async function notifyManagers(
     .map((row) => row.users?.telegram_id)
     .filter((id): id is number => Boolean(id));
 
-  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required, shift.shops?.name);
   const reasonLine = reason ? `\nReason: ${reason}` : "";
   const messageText = `${staffName} needs coverage for:\n${shiftLine} (${shift.role_required})${reasonLine}`;
 
@@ -547,7 +574,7 @@ async function notifyOtherManagers(
   shopId: string,
   excludingManagerId: string,
   staffName: string,
-  shift: { start_time: string; end_time: string; role_required: string },
+  shift: { start_time: string; end_time: string; role_required: string; shops?: { name: string } | null },
   reason: string | null
 ) {
   const { data: managerLinks } = await supabaseAdmin
@@ -563,7 +590,7 @@ async function notifyOtherManagers(
 
   if (managerTelegramIds.length === 0) return;
 
-  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required, shift.shops?.name);
   const reasonLine = reason ? `\nReason: ${reason}` : "";
   const messageText = `FYI: ${staffName} requested and auto-approved coverage for their own shift:\n${shiftLine} (${shift.role_required})${reasonLine}`;
 
@@ -674,13 +701,21 @@ bot.on("callback_query:data", async (ctx, next) => {
 async function broadcastRequest(requestId: string) {
   const { data: request } = await supabaseAdmin
     .from("coverage_requests")
-    .select("id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required)")
+    .select(
+      "id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, start_time, end_time, role_required, shops(name))"
+    )
     .eq("id", requestId)
     .maybeSingle()
     .returns<{
       id: string;
       requested_by: string;
-      shifts: { shop_id: string; start_time: string; end_time: string; role_required: string };
+      shifts: {
+        shop_id: string;
+        start_time: string;
+        end_time: string;
+        role_required: string;
+        shops: { name: string } | null;
+      };
     } | null>();
 
   if (!request || !request.shifts) return;
@@ -729,7 +764,7 @@ async function broadcastRequest(requestId: string) {
     }))
   );
 
-  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required);
+  const shiftLine = formatShiftLine(shift.start_time, shift.end_time, shift.role_required, shift.shops?.name);
   const keyboard = new InlineKeyboard().text("✅ I'll cover it", `cover:${requestId}`);
 
   for (const staffMember of eligibleStaff) {
@@ -768,20 +803,59 @@ bot.on("callback_query:data", async (ctx, next) => {
     return;
   }
 
+  // Look up the shift's time/shop BEFORE claiming it, so a cross-shop
+  // double-booking can be caught without having to unwind an
+  // already-committed claim — staff can now be linked to more than one
+  // shop, so this covering shift could easily overlap something they're
+  // already scheduled for elsewhere.
+  const { data: pending } = await supabaseAdmin
+    .from("coverage_requests")
+    .select("id, status, shifts!coverage_requests_shift_id_fkey(shop_id, role_required, start_time, end_time)")
+    .eq("id", requestId)
+    .maybeSingle()
+    .returns<{
+      id: string;
+      status: string;
+      shifts: { shop_id: string; role_required: string; start_time: string; end_time: string };
+    } | null>();
+
+  if (!pending || pending.status !== "broadcasting") {
+    await safeUi(() => ctx.answerCallbackQuery({ text: "Sorry, this shift is already covered!" }));
+    await safeUi(() => ctx.editMessageText(`${ctx.callbackQuery.message?.text}\n\n(Already covered by someone else)`));
+    return;
+  }
+
+  const targetShift = pending.shifts;
+  const conflict = await findCrossShopConflict({
+    staffId: staffMember.id,
+    startTimeIso: targetShift.start_time,
+    endTimeIso: targetShift.end_time,
+    excludeShopId: targetShift.shop_id,
+  });
+
+  if (conflict) {
+    await safeUi(() =>
+      ctx.answerCallbackQuery({
+        text: `You already have a shift at ${conflict.shopName} that overlaps this time, so you can't cover this one.`,
+        show_alert: true,
+      })
+    );
+    return;
+  }
+
   // Atomic compare-and-swap: only succeeds for whichever tap Postgres
-  // processes first, so simultaneous taps can never both "win".
+  // processes first, so simultaneous taps can never both "win". The overlap
+  // check above narrows the field first, but doesn't need to be perfectly
+  // race-free — worst case two people both pass it, and this still ensures
+  // only one of them actually claims the shift.
   const { data: updated } = await supabaseAdmin
     .from("coverage_requests")
     .update({ status: "filled", covered_by: staffMember.id, resolved_at: new Date().toISOString() })
     .eq("id", requestId)
     .eq("status", "broadcasting")
-    .select("id, requested_by, shifts!coverage_requests_shift_id_fkey(shop_id, role_required, start_time, end_time)")
+    .select("id, requested_by")
     .maybeSingle()
-    .returns<{
-      id: string;
-      requested_by: string;
-      shifts: { shop_id: string; role_required: string; start_time: string; end_time: string };
-    } | null>();
+    .returns<{ id: string; requested_by: string } | null>();
 
   if (!updated) {
     await safeUi(() => ctx.answerCallbackQuery({ text: "Sorry, this shift is already covered!" }));
@@ -802,19 +876,16 @@ bot.on("callback_query:data", async (ctx, next) => {
   // staff member rather than reassigning the original one, so the original
   // schedule stays a true historical record (see roster-grid's red/blue
   // cell coloring, which relies on this new row existing).
-  const coveredShift = updated.shifts;
-  if (coveredShift) {
-    const { error: insertShiftError } = await supabaseAdmin.from("shifts").insert({
-      shop_id: coveredShift.shop_id,
-      staff_id: staffMember.id,
-      role_required: coveredShift.role_required,
-      start_time: coveredShift.start_time,
-      end_time: coveredShift.end_time,
-      covering_request_id: updated.id,
-    });
-    if (insertShiftError) {
-      console.error("Failed to insert covering shift row", insertShiftError);
-    }
+  const { error: insertShiftError } = await supabaseAdmin.from("shifts").insert({
+    shop_id: targetShift.shop_id,
+    staff_id: staffMember.id,
+    role_required: targetShift.role_required,
+    start_time: targetShift.start_time,
+    end_time: targetShift.end_time,
+    covering_request_id: updated.id,
+  });
+  if (insertShiftError) {
+    console.error("Failed to insert covering shift row", insertShiftError);
   }
 
   const { data: otherResponses } = await supabaseAdmin
@@ -854,7 +925,7 @@ bot.on("callback_query:data", async (ctx, next) => {
   const { data: managerLinks } = await supabaseAdmin
     .from("shop_managers")
     .select("users(telegram_id)")
-    .eq("shop_id", updated.shifts!.shop_id)
+    .eq("shop_id", targetShift.shop_id)
     .returns<{ users: { telegram_id: number | null } }[]>();
 
   const managerTelegramIds = (managerLinks ?? [])

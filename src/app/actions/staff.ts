@@ -1,6 +1,7 @@
 "use server";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export type AddStaffFormState = { error?: string } | undefined;
@@ -135,4 +136,63 @@ export async function bulkAddStaff(
 
   revalidatePath("/dashboard/staff");
   return { success: `Added ${inserted.length} staff member${inserted.length > 1 ? "s" : ""}.` };
+}
+
+// Lets a manager add a staff member who already works at one of their OTHER
+// shops onto this shop's staff list too — the basis for cross-shop coverage:
+// once linked, that person automatically shows up in this shop's roster and
+// gets pinged for its coverage broadcasts (broadcastRequest already just
+// queries staff_shops by shop_id, so no other change was needed there).
+// Restricted to staff already on a shop THIS manager runs, so one business
+// can never reach into another's staff list.
+export async function linkExistingStaffToShop(
+  _prevState: UpdateStaffResult,
+  formData: FormData
+): Promise<UpdateStaffResult> {
+  const shopId = formData.get("shopId") as string;
+  const staffId = formData.get("staffId") as string;
+
+  if (!shopId || !staffId) {
+    return { error: "Missing shop or staff." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "You need to be logged in." };
+  }
+
+  const { data: managedShopLinks } = await supabaseAdmin
+    .from("shop_managers")
+    .select("shop_id")
+    .eq("user_id", user.id);
+  const managedShopIds = (managedShopLinks ?? []).map((row) => row.shop_id);
+
+  if (!managedShopIds.includes(shopId)) {
+    return { error: "You don't manage this shop." };
+  }
+
+  const { data: staffShopLink } = await supabaseAdmin
+    .from("staff_shops")
+    .select("shop_id")
+    .eq("staff_id", staffId)
+    .in("shop_id", managedShopIds)
+    .maybeSingle();
+
+  if (!staffShopLink) {
+    return { error: "That staff member doesn't belong to one of your other shops." };
+  }
+
+  const { error } = await supabaseAdmin.from("staff_shops").insert({ staff_id: staffId, shop_id: shopId });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { error: "That staff member is already added to this shop." };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard/staff");
 }

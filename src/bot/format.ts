@@ -7,7 +7,7 @@ export const SHOP_TIMEZONE = "Pacific/Auckland";
 
 export const staffMenu = new Keyboard().text("📅 My Shifts").text("💰 Sick Pay Claims").resized();
 
-export function formatShiftLine(startIso: string, endIso: string, role: string): string {
+export function formatShiftLine(startIso: string, endIso: string, role: string, shopName?: string | null): string {
   const start = new Date(startIso);
   const end = new Date(endIso);
   const dayFmt = new Intl.DateTimeFormat("en-NZ", {
@@ -22,5 +22,9 @@ export function formatShiftLine(startIso: string, endIso: string, role: string):
     minute: "2-digit",
     hour12: true,
   });
-  return `${dayFmt.format(start)}, ${timeFmt.format(start)}–${timeFmt.format(end)}`;
+  const base = `${dayFmt.format(start)}, ${timeFmt.format(start)}–${timeFmt.format(end)}`;
+  // Staff and managers can now be linked to more than one shop (cross-shop
+  // coverage), so a bare shift time is ambiguous — name the shop whenever
+  // we have it.
+  return shopName ? `${base} @ ${shopName}` : base;
 }

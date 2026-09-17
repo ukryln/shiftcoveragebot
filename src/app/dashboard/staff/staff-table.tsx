@@ -14,9 +14,11 @@ type StaffMember = {
 export function StaffTable({
   staffList,
   botUsername,
+  otherShopsByStaffId = {},
 }: {
   staffList: StaffMember[];
   botUsername: string;
+  otherShopsByStaffId?: Record<string, string[]>;
 }) {
   const [showArchived, setShowArchived] = useState(false);
 
@@ -49,7 +51,12 @@ export function StaffTable({
           </thead>
           <tbody>
             {visibleStaff.map((staffMember) => (
-              <StaffRow key={staffMember.id} staffMember={staffMember} botUsername={botUsername} />
+              <StaffRow
+                key={staffMember.id}
+                staffMember={staffMember}
+                botUsername={botUsername}
+                otherShops={otherShopsByStaffId[staffMember.id]}
+              />
             ))}
           </tbody>
         </table>

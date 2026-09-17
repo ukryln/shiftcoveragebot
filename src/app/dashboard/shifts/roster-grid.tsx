@@ -24,6 +24,9 @@ type CellState = {
   id: string | null;
   text: string;
   invalid: boolean;
+  // Why the cell is invalid, shown as a tooltip — e.g. an unparseable time,
+  // or a cross-shop double-booking caught by saveRosterCell.
+  errorMessage: string | null;
   // Given away and covered by someone else — excluded from this staff
   // member's total, shown in red as a historical record.
   givenAway: boolean;
@@ -40,6 +43,7 @@ function emptyRow(length: number): CellState[] {
     id: null,
     text: "",
     invalid: false,
+    errorMessage: null,
     givenAway: false,
     covering: false,
     sickLeaveApproved: false,
@@ -56,6 +60,10 @@ function emptyGrid(staffList: StaffMember[], dayCount: number) {
 }
 
 function cellHours(cell: CellState, period: Period): number {
+  // An invalid cell (bad format, or a save rejected e.g. for a cross-shop
+  // conflict) still shows the typed text so the user can fix it, but it was
+  // never actually persisted — it must not count toward the total.
+  if (cell.invalid) return 0;
   if (cell.givenAway && !cell.sickLeaveApproved) return 0;
   const parsed = parseCellText(cell.text, period);
   if (parsed.kind !== "range") return 0;
@@ -113,6 +121,7 @@ export function RosterGrid({
             id: shift.id,
             text: formatCellText(shift.start_time, shift.end_time),
             invalid: false,
+            errorMessage: null,
             givenAway: filledSet.has(shift.id),
             covering: Boolean(shift.covering_request_id),
             sickLeaveApproved: sickApprovedSet.has(shift.id),
@@ -130,7 +139,7 @@ export function RosterGrid({
       [staffId]: {
         ...prev[staffId],
         [period]: prev[staffId][period].map((cell, i) =>
-          i === dayIndex ? { ...cell, text, invalid: false } : cell
+          i === dayIndex ? { ...cell, text, invalid: false, errorMessage: null } : cell
         ),
       },
     }));
@@ -147,7 +156,9 @@ export function RosterGrid({
         [staffMember.id]: {
           ...prev[staffMember.id],
           [period]: prev[staffMember.id][period].map((c, i) =>
-            i === dayIndex ? { ...c, invalid: true } : c
+            i === dayIndex
+              ? { ...c, invalid: true, errorMessage: "Couldn't understand that time — try \"10-3\" or \"OFF\"" }
+              : c
           ),
         },
       }));
@@ -178,9 +189,19 @@ export function RosterGrid({
         ...prev[staffMember.id],
         [period]: prev[staffMember.id][period].map((c, i) => {
           if (i !== dayIndex) return c;
-          if (result.error) return { ...c, invalid: true };
-          if (!result.id) return { ...c, id: null, text: "", invalid: false, givenAway: false, covering: false, sickLeaveApproved: false };
-          return { ...c, id: result.id, text: formatCellText(startTimeIso!, endTimeIso!), invalid: false };
+          if (result.error) return { ...c, invalid: true, errorMessage: result.error };
+          if (!result.id)
+            return {
+              ...c,
+              id: null,
+              text: "",
+              invalid: false,
+              errorMessage: null,
+              givenAway: false,
+              covering: false,
+              sickLeaveApproved: false,
+            };
+          return { ...c, id: result.id, text: formatCellText(startTimeIso!, endTimeIso!), invalid: false, errorMessage: null };
         }),
       },
     }));
@@ -241,16 +262,21 @@ export function RosterGrid({
                         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
                         placeholder="OFF"
                         title={
-                          cell.givenAway
-                            ? cell.sickLeaveApproved
-                              ? "Given away, sick pay approved (counts toward total)"
-                              : "Given away, covered by someone else"
-                            : cell.covering
-                              ? "Covering another staff member's shift"
-                              : undefined
+                          cell.invalid
+                            ? (cell.errorMessage ?? undefined)
+                            : cell.givenAway
+                              ? cell.sickLeaveApproved
+                                ? "Given away, sick pay approved (counts toward total)"
+                                : "Given away, covered by someone else"
+                              : cell.covering
+                                ? "Covering another staff member's shift"
+                                : undefined
                         }
                         className={`w-16 rounded border px-1 py-0.5 text-center ${cellClasses(cell)} focus:border-slate-300`}
                       />
+                      {cell.invalid && cell.errorMessage && (
+                        <div className="w-16 text-[10px] leading-tight text-red-600">{cell.errorMessage}</div>
+                      )}
                     </td>
                   ))}
                   <td rowSpan={3} className="border border-slate-200 bg-slate-50 p-2 text-center align-middle font-semibold text-slate-800">
@@ -268,16 +294,21 @@ export function RosterGrid({
                         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
                         placeholder="OFF"
                         title={
-                          cell.givenAway
-                            ? cell.sickLeaveApproved
-                              ? "Given away, sick pay approved (counts toward total)"
-                              : "Given away, covered by someone else"
-                            : cell.covering
-                              ? "Covering another staff member's shift"
-                              : undefined
+                          cell.invalid
+                            ? (cell.errorMessage ?? undefined)
+                            : cell.givenAway
+                              ? cell.sickLeaveApproved
+                                ? "Given away, sick pay approved (counts toward total)"
+                                : "Given away, covered by someone else"
+                              : cell.covering
+                                ? "Covering another staff member's shift"
+                                : undefined
                         }
                         className={`w-16 rounded border px-1 py-0.5 text-center ${cellClasses(cell)} focus:border-slate-300`}
                       />
+                      {cell.invalid && cell.errorMessage && (
+                        <div className="w-16 text-[10px] leading-tight text-red-600">{cell.errorMessage}</div>
+                      )}
                     </td>
                   ))}
                 </tr>

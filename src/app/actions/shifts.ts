@@ -1,6 +1,7 @@
 "use server";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { findCrossShopConflict } from "@/lib/shift-conflicts";
 import { revalidatePath } from "next/cache";
 
 export type RosterCellResult = { id: string | null; error?: string };
@@ -26,6 +27,16 @@ export async function saveRosterCell(input: {
     }
     revalidatePath("/dashboard/shifts");
     return { id: null };
+  }
+
+  const conflict = await findCrossShopConflict({
+    staffId,
+    startTimeIso,
+    endTimeIso,
+    excludeShopId: shopId,
+  });
+  if (conflict) {
+    return { id: shiftId, error: `Already scheduled at ${conflict.shopName} during this time.` };
   }
 
   if (shiftId) {

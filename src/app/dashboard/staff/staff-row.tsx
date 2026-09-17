@@ -15,9 +15,11 @@ type StaffMember = {
 export function StaffRow({
   staffMember,
   botUsername,
+  otherShops = [],
 }: {
   staffMember: StaffMember;
   botUsername: string;
+  otherShops?: string[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(staffMember.name);
@@ -104,7 +106,12 @@ export function StaffRow({
 
   return (
     <tr className="border-b border-gray-100">
-      <td className="py-2 pr-2 text-gray-900">{staffMember.name}</td>
+      <td className="py-2 pr-2 text-gray-900">
+        {staffMember.name}
+        {otherShops.length > 0 && (
+          <div className="text-xs font-normal text-slate-400">Also at: {otherShops.join(", ")}</div>
+        )}
+      </td>
       <td className="py-2 pr-2 text-gray-700">{staffMember.role}</td>
       <td className="py-2 pr-2 capitalize text-gray-700">{staffMember.status}</td>
       <td className="py-2">
