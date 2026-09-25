@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentShop } from "@/lib/current-shop";
 import { RosterGrid } from "@/app/dashboard/shifts/roster-grid";
-import { addDays, formatDateISO, getMondayOfWeek } from "@/lib/roster";
+import { addDays, dateISOInZone, formatDateISO, getMondayOfWeek } from "@/lib/roster";
 
 export default async function ShiftsPage({
   searchParams,
@@ -31,7 +31,9 @@ export default async function ShiftsPage({
     );
   }
 
-  const referenceDate = week ? new Date(`${week}T00:00:00`) : new Date();
+  // "Today" is decided in the shop's own timezone, not the server's.
+  const [ty, tm, td] = dateISOInZone(new Date(), shop.timezone).split("-").map(Number);
+  const referenceDate = week ? new Date(`${week}T00:00:00`) : new Date(ty, tm - 1, td);
   const monday = getMondayOfWeek(referenceDate);
   const weekDates = Array.from({ length: 7 }, (_, i) => formatDateISO(addDays(monday, i)));
   const prevWeek = formatDateISO(addDays(monday, -7));
@@ -86,7 +88,7 @@ export default async function ShiftsPage({
       <h1 className="mt-2 text-2xl font-bold text-slate-900">Shifts — {shop.name}</h1>
       <p className="mt-1 text-sm text-slate-500">
         Type a time range like &quot;10-3&quot; or &quot;4-9&quot; into a cell, or &quot;OFF&quot;
-        (or leave it blank) for no shift. Times use your device&apos;s own timezone.
+        (or leave it blank) for no shift. Times are in {shop.timezone.replace(/_/g, " ")} time (change it on the dashboard).
       </p>
 
       <div className="mt-4 flex items-center gap-4">
@@ -117,6 +119,7 @@ export default async function ShiftsPage({
             rawShifts={rawShifts}
             filledCoverageShiftIds={(coverageRows ?? []).map((row) => row.shift_id)}
             approvedSickLeaveShiftIds={approvedSickLeaveShiftIds}
+            timezone={shop.timezone}
           />
         </div>
       )}

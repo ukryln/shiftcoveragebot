@@ -1,13 +1,19 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { createShop } from "@/app/actions/shops";
 
 export function CreateShopForm() {
   const [state, action, pending] = useActionState(createShop, undefined);
+  // The creator's device timezone is a good default for the new shop; it can
+  // be changed from the dashboard afterwards. Filled in after mount so server
+  // and browser HTML match.
+  const [timezone, setTimezone] = useState("");
+  useEffect(() => setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone), []);
 
   return (
     <form action={action} className="space-y-4">
+      <input type="hidden" name="timezone" value={timezone} />
       <div>
         <label htmlFor="name" className="block text-sm font-medium text-slate-700">
           Shop name

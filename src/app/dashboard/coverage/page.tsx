@@ -134,7 +134,7 @@ export default async function CoveragePage({
         )}
       </div>
 
-      <CoverageTable requests={requests ?? []} statusLabels={STATUS_LABELS} />
+      <CoverageTable requests={requests ?? []} statusLabels={STATUS_LABELS} timezone={shop.timezone} />
     </div>
   );
 }

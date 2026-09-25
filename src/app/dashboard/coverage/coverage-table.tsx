@@ -34,24 +34,26 @@ const SICK_LEAVE_STYLES: Record<string, string> = {
   rejected: "bg-red-100 text-red-800",
 };
 
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+function formatDateTime(iso: string, timeZone: string) {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZone });
 }
 
 // Same hydration-mismatch fix as the shifts page: server and browser can
 // disagree on locale-dependent formatting, so only format after mount.
-function FormattedTime({ iso }: { iso: string }) {
+function FormattedTime({ iso, timeZone }: { iso: string; timeZone: string }) {
   const [text, setText] = useState<string | null>(null);
-  useEffect(() => setText(formatDateTime(iso)), [iso]);
+  useEffect(() => setText(formatDateTime(iso, timeZone)), [iso, timeZone]);
   return <>{text ?? " "}</>;
 }
 
 export function CoverageTable({
   requests,
   statusLabels,
+  timezone,
 }: {
   requests: Request[];
   statusLabels: Record<string, string>;
+  timezone: string;
 }) {
   if (requests.length === 0) {
     return <p className="mt-6 text-slate-600">No coverage requests match these filters.</p>;
@@ -74,7 +76,7 @@ export function CoverageTable({
           {requests.map((request) => (
             <tr key={request.id} className="border-b border-slate-100 last:border-0">
               <td className="px-4 py-3 text-slate-900">
-                <FormattedTime iso={request.shifts.start_time} /> ({request.shifts.role_required})
+                <FormattedTime iso={request.shifts.start_time} timeZone={timezone} /> ({request.shifts.role_required})
               </td>
               <td className="px-4 py-3 text-slate-700">{request.requester.name}</td>
               <td className="px-4 py-3 text-slate-500">{request.reason ?? "—"}</td>
@@ -94,7 +96,7 @@ export function CoverageTable({
               </td>
               <td className="px-4 py-3 text-slate-700">{request.coverer?.name ?? "—"}</td>
               <td className="px-4 py-3 text-slate-500">
-                <FormattedTime iso={request.created_at} />
+                <FormattedTime iso={request.created_at} timeZone={timezone} />
               </td>
             </tr>
           ))}

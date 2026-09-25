@@ -8,6 +8,7 @@ create extension if not exists pgcrypto;
 create table if not exists shops (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  timezone text not null default 'Pacific/Auckland',
   created_at timestamptz not null default now()
 );
 

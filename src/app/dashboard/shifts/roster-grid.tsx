@@ -6,6 +6,7 @@ import {
   combineDateAndTime,
   dayLabel,
   formatCellText,
+  hourInZone,
   isSameLocalDate,
   parseCellText,
   type Period,
@@ -79,8 +80,10 @@ export function RosterGrid({
   rawShifts,
   filledCoverageShiftIds,
   approvedSickLeaveShiftIds,
+  timezone,
 }: {
   shopId: string;
+  timezone: string;
   staffList: StaffMember[];
   weekDates: string[];
   rawShifts: RawShift[];
@@ -89,10 +92,8 @@ export function RosterGrid({
 }) {
   const [grid, setGrid] = useState(() => emptyGrid(staffList, weekDates.length));
 
-  // Formatting shift times depends on the viewer's own timezone, which can
-  // differ from the server's — computing it only after mount keeps the
-  // server-rendered and first client-rendered HTML identical (see the fix
-  // for the same issue on the old shifts list page).
+  // Cells are built after mount, from the shop's timezone, so the
+  // server-rendered and first client-rendered HTML stay identical.
   useEffect(() => {
     const next = emptyGrid(staffList, weekDates.length);
     const filledSet = new Set(filledCoverageShiftIds);
@@ -103,7 +104,7 @@ export function RosterGrid({
 
       weekDates.forEach((dateISO, dayIndex) => {
         const dayShifts = staffShifts
-          .filter((shift) => isSameLocalDate(shift.start_time, dateISO))
+          .filter((shift) => isSameLocalDate(shift.start_time, dateISO, timezone))
           .sort((a, b) => a.start_time.localeCompare(b.start_time))
           .slice(0, 2);
 
@@ -113,13 +114,13 @@ export function RosterGrid({
               ? i === 0
                 ? "lunch"
                 : "dinner"
-              : new Date(shift.start_time).getHours() < 15
+              : hourInZone(shift.start_time, timezone) < 15
                 ? "lunch"
                 : "dinner";
 
           next[staffMember.id][period][dayIndex] = {
             id: shift.id,
-            text: formatCellText(shift.start_time, shift.end_time),
+            text: formatCellText(shift.start_time, shift.end_time, timezone),
             invalid: false,
             errorMessage: null,
             givenAway: filledSet.has(shift.id),
@@ -131,7 +132,7 @@ export function RosterGrid({
     }
 
     setGrid(next);
-  }, [rawShifts, staffList, weekDates, filledCoverageShiftIds, approvedSickLeaveShiftIds]);
+  }, [rawShifts, staffList, weekDates, filledCoverageShiftIds, approvedSickLeaveShiftIds, timezone]);
 
   function updateCellText(staffId: string, period: Period, dayIndex: number, text: string) {
     setGrid((prev) => ({
@@ -167,11 +168,11 @@ export function RosterGrid({
 
     const startTimeIso =
       parsed.kind === "range"
-        ? combineDateAndTime(dateISO, parsed.startHour, parsed.startMinute).toISOString()
+        ? combineDateAndTime(dateISO, parsed.startHour, parsed.startMinute, timezone).toISOString()
         : null;
     const endTimeIso =
       parsed.kind === "range"
-        ? combineDateAndTime(dateISO, parsed.endHour, parsed.endMinute).toISOString()
+        ? combineDateAndTime(dateISO, parsed.endHour, parsed.endMinute, timezone).toISOString()
         : null;
 
     const result = await saveRosterCell({
@@ -201,7 +202,7 @@ export function RosterGrid({
               covering: false,
               sickLeaveApproved: false,
             };
-          return { ...c, id: result.id, text: formatCellText(startTimeIso!, endTimeIso!), invalid: false, errorMessage: null };
+          return { ...c, id: result.id, text: formatCellText(startTimeIso!, endTimeIso!, timezone), invalid: false, errorMessage: null };
         }),
       },
     }));

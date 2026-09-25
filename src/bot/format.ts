@@ -1,30 +1,31 @@
 import { Keyboard } from "grammy";
 
-// All shops are NZ-based for now, so shift times shown to staff use a fixed
-// timezone rather than trying to guess one — there's no "browser" for a
-// bot reply to infer a timezone from.
-export const SHOP_TIMEZONE = "Pacific/Auckland";
+// Used only when a shop's own timezone isn't available.
+export const DEFAULT_TIMEZONE = "Pacific/Auckland";
+
+export type ShopInfo = { name: string; timezone?: string | null };
 
 export const staffMenu = new Keyboard().text("📅 My Shifts").text("💰 Sick Pay Claims").resized();
 
-export function formatShiftLine(startIso: string, endIso: string, role: string, shopName?: string | null): string {
+// Times are shown in the shop's own timezone — there's no "browser" for a bot
+// reply to infer one from. Staff and managers can be linked to more than one
+// shop, so the shop is named whenever we have it.
+export function formatShiftLine(startIso: string, endIso: string, role: string, shop?: ShopInfo | null): string {
+  const timeZone = shop?.timezone || DEFAULT_TIMEZONE;
   const start = new Date(startIso);
   const end = new Date(endIso);
   const dayFmt = new Intl.DateTimeFormat("en-NZ", {
-    timeZone: SHOP_TIMEZONE,
+    timeZone,
     weekday: "short",
     day: "numeric",
     month: "short",
   });
   const timeFmt = new Intl.DateTimeFormat("en-NZ", {
-    timeZone: SHOP_TIMEZONE,
+    timeZone,
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
   const base = `${dayFmt.format(start)}, ${timeFmt.format(start)}–${timeFmt.format(end)}`;
-  // Staff and managers can now be linked to more than one shop (cross-shop
-  // coverage), so a bare shift time is ambiguous — name the shop whenever
-  // we have it.
-  return shopName ? `${base} @ ${shopName}` : base;
+  return shop?.name ? `${base} @ ${shop.name}` : base;
 }

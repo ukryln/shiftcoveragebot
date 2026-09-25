@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-export type ShopSummary = { id: string; name: string };
+export type ShopSummary = { id: string; name: string; timezone: string };
 
 const SELECTED_SHOP_COOKIE = "selected_shop_id";
 
@@ -15,7 +15,7 @@ export async function getCurrentShop(
 ): Promise<{ shop: ShopSummary | null; allShops: ShopSummary[] }> {
   const { data: managedShops } = await supabaseAdmin
     .from("shop_managers")
-    .select("shops(id, name)")
+    .select("shops(id, name, timezone)")
     .eq("user_id", userId)
     .returns<{ shops: ShopSummary }[]>();
 

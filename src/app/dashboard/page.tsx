@@ -6,6 +6,7 @@ import { ConnectTelegram } from "@/app/dashboard/connect-telegram";
 import { ManageShop } from "@/app/dashboard/manage-shop";
 import { ManagerInvites } from "@/app/dashboard/manager-invites";
 import { NavCard } from "@/app/dashboard/nav-card";
+import { TimezoneSetting } from "@/app/dashboard/timezone-setting";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -54,6 +55,7 @@ export default async function DashboardPage() {
         <ManageShop shopId={shop.id} shopName={shop.name} />
       </div>
       <p className="text-sm text-slate-500">Logged in as {user?.email}</p>
+      <TimezoneSetting shopId={shop.id} timezone={shop.timezone} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <NavCard

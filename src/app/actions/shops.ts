@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { SELECTED_SHOP_COOKIE } from "@/lib/current-shop";
 import { requireShopManager } from "@/lib/auth";
+import { isValidTimezone } from "@/lib/roster";
 
 export type CreateShopFormState = { error?: string } | undefined;
 
@@ -28,9 +29,13 @@ export async function createShop(
     return { error: "You must be logged in." };
   }
 
+  // The form sends the creator's own device timezone as a sensible default.
+  const requestedTz = (formData.get("timezone") as string | null) ?? "";
+  const timezone = requestedTz && isValidTimezone(requestedTz) ? requestedTz : "Pacific/Auckland";
+
   const { data: shop, error: shopError } = await supabaseAdmin
     .from("shops")
-    .insert({ name: name.trim() })
+    .insert({ name: name.trim(), timezone })
     .select()
     .single();
 
@@ -71,6 +76,22 @@ export async function renameShop(
 
   const { error } = await supabaseAdmin.from("shops").update({ name: name.trim() }).eq("id", shopId);
 
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard", "layout");
+}
+
+export async function setShopTimezone(shopId: string, timezone: string): Promise<ShopActionState> {
+  if (!isValidTimezone(timezone)) {
+    return { error: "That isn't a valid timezone." };
+  }
+
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
+
+  const { error } = await supabaseAdmin.from("shops").update({ timezone }).eq("id", shopId);
   if (error) {
     return { error: error.message };
   }

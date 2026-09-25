@@ -25,16 +25,66 @@ export function formatDateISO(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-// Builds a Date for a given calendar date + hour/minute, in whichever
-// timezone this code happens to run in (the browser, when called from the
-// roster grid — consistent with how shift times work elsewhere in the app).
-export function combineDateAndTime(dateISO: string, hour: number, minute: number): Date {
-  const [y, m, d] = dateISO.split("-").map(Number);
-  return new Date(y, m - 1, d, hour, minute, 0, 0);
+// Every shop has its own timezone, and shift times are always read and
+// written in that zone — never the viewer's device zone or the server's — so
+// a manager travelling, or a server in another country, can't shift a roster.
+
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function isSameLocalDate(iso: string, dateISO: string): boolean {
-  return formatDateISO(new Date(iso)) === dateISO;
+function zonedParts(date: Date, tz: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+// The absolute moment when the wall clock in `tz` reads dateISO + hour:minute.
+export function combineDateAndTime(dateISO: string, hour: number, minute: number, tz: string): Date {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const wanted = Date.UTC(y, m - 1, d, hour, minute, 0);
+  let guess = wanted;
+  // Two passes converge even across a daylight-saving change.
+  for (let i = 0; i < 2; i++) {
+    const p = zonedParts(new Date(guess), tz);
+    const shown = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    guess -= shown - wanted;
+  }
+  return new Date(guess);
+}
+
+export function dateISOInZone(iso: string | Date, tz: string): string {
+  const p = zonedParts(new Date(iso), tz);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
+}
+
+export function hourInZone(iso: string, tz: string): number {
+  return zonedParts(new Date(iso), tz).hour;
+}
+
+export function isSameLocalDate(iso: string, dateISO: string, tz: string): boolean {
+  return dateISOInZone(iso, tz) === dateISO;
 }
 
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -101,11 +151,11 @@ export function parseCellText(text: string, period: Period): ParseResult {
   };
 }
 
-export function formatCellText(startIso: string, endIso: string): string {
+export function formatCellText(startIso: string, endIso: string, tz: string): string {
   const fmt = (iso: string) => {
-    const d = new Date(iso);
-    let h = d.getHours();
-    const m = d.getMinutes();
+    const p = zonedParts(new Date(iso), tz);
+    let h = p.hour;
+    const m = p.minute;
     if (h === 0) h = 12;
     else if (h > 12) h -= 12;
     return m === 0 ? `${h}` : `${h}.${String(m).padStart(2, "0")}`;
