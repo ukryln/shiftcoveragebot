@@ -89,7 +89,10 @@ export default async function StaffPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">Staff — {shop.name}</h1>
+      <Link href="/dashboard" className="text-sm text-slate-500 underline">
+        ← Back to dashboard
+      </Link>
+      <h1 className="mt-2 text-2xl font-bold text-slate-900">Staff — {shop.name}</h1>
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <StaffTable

@@ -20,19 +20,6 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
             <Link href="/dashboard" className="text-lg font-bold text-indigo-600">
               Shift Coverage Bot
             </Link>
-            {shop && (
-              <nav className="hidden gap-6 sm:flex">
-                <Link href="/dashboard/staff" className="text-sm font-medium text-slate-600 hover:text-indigo-600">
-                  Staff
-                </Link>
-                <Link href="/dashboard/shifts" className="text-sm font-medium text-slate-600 hover:text-indigo-600">
-                  Shifts
-                </Link>
-                <Link href="/dashboard/coverage" className="text-sm font-medium text-slate-600 hover:text-indigo-600">
-                  Coverage
-                </Link>
-              </nav>
-            )}
           </div>
           <div className="flex items-center gap-3">
             {shop && <ShopSwitcher currentShopId={shop.id} allShops={allShops} />}

@@ -80,7 +80,10 @@ export default async function ShiftsPage({
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">Shifts — {shop.name}</h1>
+      <Link href="/dashboard" className="text-sm text-slate-500 underline">
+        ← Back to dashboard
+      </Link>
+      <h1 className="mt-2 text-2xl font-bold text-slate-900">Shifts — {shop.name}</h1>
       <p className="mt-1 text-sm text-slate-500">
         Type a time range like &quot;10-3&quot; or &quot;4-9&quot; into a cell, or &quot;OFF&quot;
         (or leave it blank) for no shift. Times use your device&apos;s own timezone.
