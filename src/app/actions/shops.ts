@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { SELECTED_SHOP_COOKIE } from "@/lib/current-shop";
+import { requireShopManager } from "@/lib/auth";
 
 export type CreateShopFormState = { error?: string } | undefined;
 
@@ -65,6 +66,9 @@ export async function renameShop(
     return { error: "Shop name is required." };
   }
 
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
+
   const { error } = await supabaseAdmin.from("shops").update({ name: name.trim() }).eq("id", shopId);
 
   if (error) {
@@ -75,6 +79,9 @@ export async function renameShop(
 }
 
 export async function deleteShop(shopId: string): Promise<ShopActionState> {
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
+
   // Cascades in the schema clean up shop_managers, staff_shops, shifts (and
   // in turn coverage_requests/coverage_responses) automatically - staff rows
   // themselves are kept since a staff member can work at other shops too.
@@ -93,6 +100,9 @@ export async function deleteShop(shopId: string): Promise<ShopActionState> {
 }
 
 export async function setSelectedShop(shopId: string) {
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return;
+
   const cookieStore = await cookies();
   cookieStore.set(SELECTED_SHOP_COOKIE, shopId, { path: "/", maxAge: 60 * 60 * 24 * 365 });
   revalidatePath("/dashboard", "layout");
@@ -111,14 +121,9 @@ export async function inviteManager(
     return { error: "Email is required." };
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be logged in." };
-  }
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
+  const user = { id: auth.userId };
 
   const token = crypto.randomUUID();
 

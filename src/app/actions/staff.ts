@@ -2,6 +2,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { requireShopManager, requireStaffManager } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
 export type AddStaffFormState = { error?: string } | undefined;
@@ -23,6 +24,9 @@ export async function addStaff(
   if (!role || !role.trim()) {
     return { error: "Role is required." };
   }
+
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
 
   const { data: staffMember, error: staffError } = await supabaseAdmin
     .from("staff")
@@ -59,6 +63,9 @@ export async function updateStaff(
     return { error: "Role is required." };
   }
 
+  const auth = await requireStaffManager(staffId);
+  if ("error" in auth) return { error: auth.error };
+
   const { error } = await supabaseAdmin
     .from("staff")
     .update({ name: name.trim(), role: role.trim() })
@@ -75,6 +82,13 @@ export async function setStaffStatus(
   staffId: string,
   status: "pending" | "active" | "archived"
 ): Promise<UpdateStaffResult> {
+  if (!["pending", "active", "archived"].includes(status)) {
+    return { error: "Invalid status." };
+  }
+
+  const auth = await requireStaffManager(staffId);
+  if ("error" in auth) return { error: auth.error };
+
   const { error } = await supabaseAdmin.from("staff").update({ status }).eq("id", staffId);
 
   if (error) {
@@ -108,6 +122,9 @@ export async function bulkAddStaff(
   if (!shopId) {
     return { error: "Missing shop." };
   }
+
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { error: auth.error };
 
   const rows = parsePastedRows(raw ?? "");
 

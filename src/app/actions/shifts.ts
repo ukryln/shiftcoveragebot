@@ -2,6 +2,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { findCrossShopConflict } from "@/lib/shift-conflicts";
+import { requireShopManager } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
 export type RosterCellResult = { id: string | null; error?: string };
@@ -17,6 +18,30 @@ export async function saveRosterCell(input: {
   endTimeIso: string | null;
 }): Promise<RosterCellResult> {
   const { shiftId, shopId, staffId, roleRequired, startTimeIso, endTimeIso } = input;
+
+  const auth = await requireShopManager(shopId);
+  if ("error" in auth) return { id: shiftId, error: auth.error };
+
+  // The staff member must actually work at this shop, and an existing shift
+  // being edited/deleted must belong to it — otherwise a caller could pass
+  // their own shopId alongside someone else's staff or shift ids.
+  const { data: staffLink } = await supabaseAdmin
+    .from("staff_shops")
+    .select("staff_id")
+    .eq("staff_id", staffId)
+    .eq("shop_id", shopId)
+    .maybeSingle();
+  if (!staffLink) return { id: shiftId, error: "That staff member isn't on this shop's roster." };
+
+  if (shiftId) {
+    const { data: ownShift } = await supabaseAdmin
+      .from("shifts")
+      .select("id")
+      .eq("id", shiftId)
+      .eq("shop_id", shopId)
+      .maybeSingle();
+    if (!ownShift) return { id: shiftId, error: "That shift doesn't belong to this shop." };
+  }
 
   if (!startTimeIso || !endTimeIso) {
     if (shiftId) {

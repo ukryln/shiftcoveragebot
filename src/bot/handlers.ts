@@ -803,6 +803,20 @@ bot.on("callback_query:data", async (ctx, next) => {
     return;
   }
 
+  // Only staff who were actually offered this shift (broadcastRequest records
+  // a coverage_responses row for each) may claim it — the request id alone
+  // shouldn't be enough.
+  const { data: offered } = await supabaseAdmin
+    .from("coverage_responses")
+    .select("id")
+    .eq("coverage_request_id", requestId)
+    .eq("staff_id", staffMember.id)
+    .maybeSingle();
+  if (!offered) {
+    await safeUi(() => ctx.answerCallbackQuery({ text: "This shift wasn't offered to you." }));
+    return;
+  }
+
   // Look up the shift's time/shop BEFORE claiming it, so a cross-shop
   // double-booking can be caught without having to unwind an
   // already-committed claim — staff can now be linked to more than one
