@@ -72,7 +72,7 @@ Environment variable names (values are in `.env.local` locally and in Netlify's 
 
 ## Running costs and operations
 
-- Supabase free tier pauses a project after one week of no activity. A paused project can be restored with one click in the Supabase dashboard and loses nothing. For real customers, move to the Pro plan (about US$25 a month: never pauses, daily backups). A free alternative is a scheduled job that calls the database every few days.
+- Supabase free tier pauses a project after one week of no activity. A paused project can be restored with one click in the Supabase dashboard and loses nothing. For real customers, move to the Pro plan (about US$25 a month: never pauses, daily backups). A free keep-alive is built: `netlify/functions/keepalive.mts` runs every 3 days on Netlify's schedule and calls `/api/keepalive`, which reads one row. Check Netlify's Functions tab to confirm it is listed as scheduled. (GitHub Actions was avoided because GitHub disables scheduled workflows after 60 days without repo activity.)
 - Netlify free tier has limited build minutes.
 
 ## Not built yet
